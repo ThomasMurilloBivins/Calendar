@@ -1,3 +1,14 @@
+// Replaces a node's children, dropping null/false so `cond ? node : null`
+// works everywhere. Plain replaceChildren would render the literal "null".
+export function fill(node, ...kids) {
+  node.replaceChildren();
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return node;
+}
+
 export function el(tag, props = {}, ...kids) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
@@ -7,18 +18,15 @@ export function el(tag, props = {}, ...kids) {
     else if (v === true) node.setAttribute(k, '');
     else if (v !== false && v != null) node.setAttribute(k, v);
   }
-  for (const kid of kids.flat(Infinity)) {
-    if (kid == null || kid === false) continue;
-    node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
-  }
-  return node;
+  return fill(node, ...kids);
 }
 
 let toastTimer = null;
 
 export function toast(message, action) {
   const box = document.getElementById('toast');
-  box.replaceChildren(
+  fill(
+    box,
     el('span', {}, message),
     action &&
       el(

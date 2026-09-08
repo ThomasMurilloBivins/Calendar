@@ -9,6 +9,10 @@ import {
   fmtTime,
   toMin,
   toHM,
+  addDays,
+  relativeDay,
+  freeSlots,
+  overdueItems,
   itemsForDay,
   eventsForDay,
   fixedForDay,
@@ -169,18 +173,137 @@ function taskRow(item) {
 
 function three() {
   const list = todaysThree();
+  const day = todayStr();
+  // Scheduled for today but not one of the three — offered as a swap rather
+  // than silently ignored.
+  const alsoToday = itemsForDay(day).filter((i) => i.top3For !== day && i.status !== 'done');
   return el(
     'section',
     {},
     el('h2', {}, "Today's three"),
-    list.map(taskRow),
-    list.length < 3
+    list.map((item) =>
+      el(
+        'div',
+        { style: 'position:relative' },
+        taskRow(item),
+        el(
+          'button',
+          {
+            class: 'danger',
+            style: 'position:absolute;top:.5rem;right:.5rem;min-height:0;padding:.15rem .5rem;font-size:.75rem',
+            title: 'Take it out of the three',
+            onclick: () => patch('items', item.id, { top3For: null }),
+          },
+          '−'
+        )
+      )
+    ),
+    list.length < 3 && alsoToday.length
+      ? alsoToday.slice(0, 3).map((item) =>
+          el(
+            'button',
+            {
+              class: 'card muted',
+              style: 'width:100%;text-align:left',
+              onclick: () => patch('items', item.id, { top3For: day }),
+            },
+            `+ ${item.text}`
+          )
+        )
+      : null,
+    list.length < 3 && !alsoToday.length
       ? el(
           'a',
           { class: 'card muted', href: '#inbox', style: 'display:block;text-decoration:none' },
           list.length === 0 ? 'Pick your three from the inbox →' : 'Add another from the inbox →'
         )
       : null
+  );
+}
+
+// --- overdue -------------------------------------------------------------
+function nextFree(fromDay, duration) {
+  for (let n = 0; n < 7; n++) {
+    const d = addDays(fromDay, n);
+    const slot = freeSlots(d, duration)[0];
+    if (slot) return { day: d, time: slot };
+  }
+  return null;
+}
+
+// An overdue task never just sits there glowing red. It asks one question with
+// three answers, and dropping is a real answer — offered first-class, not as a
+// failure.
+function overdue() {
+  const items = overdueItems();
+  if (!items.length) return null;
+  return el(
+    'section',
+    {},
+    items.slice(0, 3).map((item) => {
+      const duration = item.durationMin || DEFAULT_DURATION;
+      const fallbackUsable =
+        item.fallbackDay && item.fallbackTime && item.fallbackDay >= todayStr()
+          ? { day: item.fallbackDay, time: item.fallbackTime }
+          : null;
+      const move = fallbackUsable || nextFree(todayStr(), duration);
+      const smaller = Math.max(15, Math.round(duration / 2 / 15) * 15);
+      const shrinkTo = nextFree(todayStr(), smaller);
+      return el(
+        'div',
+        { class: 'card' },
+        el('div', {}, `${relativeDay(item.day)} didn't happen: ${item.text}`),
+        el('div', { class: 'meta', style: 'margin-bottom:.6rem' }, 'No harm done. What now?'),
+        el(
+          'div',
+          { class: 'row' },
+          move
+            ? el(
+                'button',
+                {
+                  class: 'primary',
+                  style: 'font-size:.8rem;padding:.6rem .4rem',
+                  onclick: () => patch('items', item.id, { day: move.day, time: move.time }),
+                },
+                `${fallbackUsable ? 'Fallback' : 'Move'}: ${relativeDay(move.day)} ${fmtTime(move.time)}`
+              )
+            : null,
+          shrinkTo
+            ? el(
+                'button',
+                {
+                  class: 'ghost',
+                  style: 'font-size:.8rem;padding:.6rem .4rem',
+                  onclick: () => {
+                    patch('items', item.id, {
+                      durationMin: smaller,
+                      day: shrinkTo.day,
+                      time: shrinkTo.time,
+                    });
+                    toast(`Shrunk to ${smaller} minutes.`);
+                  },
+                },
+                `Shrink to ${smaller}m`
+              )
+            : null,
+          el(
+            'button',
+            {
+              class: 'danger',
+              style: 'font-size:.8rem;padding:.6rem .4rem',
+              onclick: () => {
+                patch('items', item.id, { status: 'dropped' });
+                toast('Dropped.', {
+                  label: 'Undo',
+                  run: () => patch('items', item.id, { status: 'planned' }),
+                });
+              },
+            },
+            'Drop'
+          )
+        )
+      );
+    })
   );
 }
 
@@ -389,6 +512,7 @@ export default function today() {
   return [
     capture(),
     el('h1', {}, fmtDate(todayStr())),
+    overdue(),
     progress(),
     weeklyGoal(),
     three(),
