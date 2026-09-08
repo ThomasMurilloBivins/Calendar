@@ -45,6 +45,8 @@ export function openOverlay(build) {
   const close = () => {
     layer.hidden = true;
     layer.replaceChildren();
+    // The screen underneath skipped its re-renders while this was open.
+    window.dispatchEvent(new Event('overlay-closed'));
   };
   layer.replaceChildren(build(close));
   layer.hidden = false;

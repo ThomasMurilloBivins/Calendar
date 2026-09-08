@@ -1,5 +1,403 @@
-import { el } from '../dom.js';
+import { state, put, patch, setSettings } from '../store.js';
+import { el, toast, openOverlay } from '../dom.js';
+import {
+  DOW,
+  BUFFER,
+  DEFAULT_DURATION,
+  today as todayStr,
+  fmtDate,
+  fmtTime,
+  toMin,
+  toHM,
+  itemsForDay,
+  eventsForDay,
+  fixedForDay,
+  overflowRange,
+  todaysThree,
+  dayProgress,
+  weekDone,
+  weekGoal,
+  weekStart,
+  suggestedTarget,
+} from '../util.js';
+
+const PX_PER_MIN = 1; // .hour is 60px tall
+
+// --- capture -------------------------------------------------------------
+// One field, no dropdowns, no required anything. Enter saves it to the Inbox
+// and the field stays focused so a second thought costs nothing.
+// The input is created once and re-used across renders. Saving re-renders the
+// screen, and a brand new input each time would drop the keyboard on a phone
+// after every single capture.
+const captureInput = el('input', {
+  type: 'text',
+  placeholder: "What's on your mind?",
+  enterkeyhint: 'done',
+  autocomplete: 'off',
+  autocapitalize: 'sentences',
+});
+
+function capture() {
+  const submit = (e) => {
+    e.preventDefault();
+    const text = captureInput.value.trim();
+    if (!text) return;
+    put('items', { text, createdAt: Date.now(), status: 'inbox' });
+    captureInput.value = '';
+    captureInput.focus();
+    toast('In your inbox');
+  };
+  return el(
+    'form',
+    { class: 'capture', onsubmit: submit },
+    captureInput,
+    el('button', { type: 'submit', 'aria-label': 'Save to inbox' }, '↑')
+  );
+}
+
+// --- progress ------------------------------------------------------------
+function progress() {
+  const { pct, done, total } = dayProgress();
+  return el(
+    'section',
+    {},
+    el('div', { class: 'bar' }, el('div', { class: 'bar-fill', style: `width:${pct}%` })),
+    el(
+      'p',
+      { class: 'muted' },
+      total
+        ? `${done} of ${total} done — planning the day already counted.`
+        : 'Planning the day already counted.'
+    )
+  );
+}
+
+function goalEditor(close) {
+  const ws = weekStart();
+  const suggested = suggestedTarget();
+  const input = el('input', { type: 'number', min: '1', max: '40', value: String(weekGoal()) });
+  const note = el('p', { class: 'muted' }, '');
+  const check = () => {
+    const n = Number(input.value);
+    note.textContent =
+      n > suggested * 1.5
+        ? `That's a big jump from your recent pace of about ${suggested}. Moderate goals are the ones people are still keeping a year later.`
+        : n < Math.max(3, suggested * 0.5)
+          ? `You can aim higher than that — around ${suggested} looks like your pace.`
+          : `About right for your recent pace (${suggested}).`;
+  };
+  input.addEventListener('input', check);
+  check();
+  return el(
+    'div',
+    { class: 'sheet' },
+    el('h1', {}, 'Weekly goal'),
+    el('p', { class: 'muted' }, 'How many tasks do you want to finish this week?'),
+    el('label', {}, 'Tasks'),
+    input,
+    note,
+    el(
+      'div',
+      { class: 'row', style: 'margin-top:1.2rem' },
+      el('button', { class: 'ghost', onclick: close }, 'Cancel'),
+      el(
+        'button',
+        {
+          class: 'primary',
+          onclick: () => {
+            put('weeklyGoals', { id: ws, target: Math.max(1, Number(input.value) || suggested) });
+            close();
+          },
+        },
+        'Save'
+      )
+    )
+  );
+}
+
+// Progress monitoring only helps when it's frequent and in view, so the week
+// sits on the home screen rather than behind a tab.
+function weeklyGoal() {
+  const done = weekDone();
+  const target = weekGoal();
+  const pct = Math.min(100, Math.round((done / target) * 100));
+  return el(
+    'button',
+    { class: 'card', style: 'width:100%;text-align:left', onclick: () => openOverlay(goalEditor) },
+    el(
+      'div',
+      { style: 'display:flex;justify-content:space-between;align-items:baseline' },
+      el('strong', { style: 'font-size:.9rem' }, 'This week'),
+      el('span', { class: 'muted' }, `${done} of ${target}`)
+    ),
+    el(
+      'div',
+      { class: 'bar bar-small', style: 'margin-top:.5rem' },
+      el('div', { class: 'bar-fill', style: `width:${pct}%` })
+    )
+  );
+}
+
+// --- today's three -------------------------------------------------------
+function taskRow(item) {
+  const done = item.status === 'done';
+  const meta = [item.time && fmtTime(item.time), item.where].filter(Boolean).join(' · ');
+  return el(
+    'div',
+    { class: `card task${done ? ' done' : ''}` },
+    el(
+      'button',
+      {
+        class: `task-check${done ? ' on' : ''}`,
+        'aria-label': done ? 'Mark not done' : 'Mark done',
+        onclick: () =>
+          patch('items', item.id, {
+            status: done ? 'planned' : 'done',
+            completedOn: done ? null : todayStr(),
+          }),
+      },
+      done ? '✓' : ''
+    ),
+    el(
+      'div',
+      {},
+      el('div', { class: 'task-text' }, item.text),
+      meta ? el('div', { class: 'meta' }, meta) : el('div', { class: 'meta' }, 'No time or place yet')
+    )
+  );
+}
+
+function three() {
+  const list = todaysThree();
+  return el(
+    'section',
+    {},
+    el('h2', {}, "Today's three"),
+    list.map(taskRow),
+    list.length < 3
+      ? el(
+          'a',
+          { class: 'card muted', href: '#inbox', style: 'display:block;text-decoration:none' },
+          list.length === 0 ? 'Pick your three from the inbox →' : 'Add another from the inbox →'
+        )
+      : null
+  );
+}
+
+// --- the day -------------------------------------------------------------
+function block(cls, startMin, endMin, dayStart, ...content) {
+  return el(
+    'div',
+    {
+      class: `block ${cls}`,
+      style: `top:${(startMin - dayStart) * PX_PER_MIN}px;height:${(endMin - startMin) * PX_PER_MIN - 2}px`,
+    },
+    ...content
+  );
+}
+
+function dayView() {
+  const day = todayStr();
+  const dayStart = toMin(state.settings.dayStart);
+  const dayEnd = toMin(state.settings.dayEnd);
+  const hours = [];
+  for (let m = dayStart; m < dayEnd; m += 60) {
+    hours.push(el('div', { class: 'hour' }, el('span', { class: 'hour-label' }, fmtTime(toHM(m)))));
+  }
+
+  const blocks = [];
+  const of = overflowRange();
+  blocks.push(
+    block('block-overflow', of.start, of.end, dayStart, 'Overflow — keep this one free')
+  );
+
+  for (const b of fixedForDay(day)) {
+    const s = toMin(b.start);
+    const e = toMin(b.end);
+    // 15-minute buffers so nothing is scheduled flush against a commitment you
+    // have to physically get to.
+    blocks.push(block('block-buffer', Math.max(dayStart, s - BUFFER), s, dayStart));
+    blocks.push(block('block-buffer', e, Math.min(dayEnd, e + BUFFER), dayStart));
+    blocks.push(
+      block('block-fixed', s, e, dayStart, el('b', {}, b.title), b.where ? ` · ${b.where}` : '')
+    );
+  }
+
+  for (const i of itemsForDay(day)) {
+    if (!i.time) continue;
+    const s = toMin(i.time);
+    blocks.push(
+      block('block-task', s, s + (i.durationMin || DEFAULT_DURATION), dayStart, el('b', {}, i.text))
+    );
+  }
+
+  for (const ev of eventsForDay(day)) {
+    if (!ev.time) continue;
+    const s = toMin(ev.time);
+    blocks.push(
+      block('block-event', s, s + (ev.durationMin || DEFAULT_DURATION), dayStart, el('b', {}, ev.title))
+    );
+  }
+
+  const allDay = eventsForDay(day).filter((e) => !e.time);
+
+  return el(
+    'section',
+    {},
+    el('h2', {}, 'Your day'),
+    allDay.map((e) => el('div', { class: 'card meta' }, `${e.kind}: ${e.title}`)),
+    el('div', { class: 'day' }, hours, el('div', { class: 'blocks' }, blocks))
+  );
+}
+
+// A full day is the thing that fails by mid-morning, so say so before it does.
+function overloadNudge() {
+  const day = todayStr();
+  const items = itemsForDay(day).filter((i) => i.status !== 'done');
+  const minutes = items.reduce((sum, i) => sum + (i.durationMin || DEFAULT_DURATION), 0);
+  if (items.length <= 3 && minutes <= 300) return null;
+  return el(
+    'div',
+    { class: 'card muted' },
+    `That's ${items.length} things and about ${Math.round(minutes / 60)} hours today. Anything here that could just as well be tomorrow?`
+  );
+}
+
+// --- schedule editor -----------------------------------------------------
+// Classes and shifts repeat weekly; the buffers and free-slot maths need them,
+// so they live here rather than in a settings screen.
+function scheduleEditor(close) {
+  const blocks = Object.values(state.fixedBlocks)
+    .filter((b) => !b.deleted)
+    .sort((a, b) => a.weekday - b.weekday || toMin(a.start) - toMin(b.start));
+
+  let weekday = new Date().getDay();
+  const title = el('input', { type: 'text', placeholder: 'ENGL 1101' });
+  const where = el('input', { type: 'text', placeholder: 'Where (optional)' });
+  const start = el('input', { type: 'time', value: '10:00' });
+  const end = el('input', { type: 'time', value: '11:15' });
+  const dayChips = el(
+    'div',
+    { class: 'chips' },
+    DOW.map((d, i) =>
+      el(
+        'button',
+        {
+          class: `chip${i === weekday ? ' on' : ''}`,
+          onclick: (e) => {
+            weekday = i;
+            for (const c of dayChips.children) c.classList.remove('on');
+            e.currentTarget.classList.add('on');
+          },
+        },
+        d
+      )
+    )
+  );
+
+  const rerender = () => {
+    close();
+    openOverlay(scheduleEditor);
+  };
+
+  return el(
+    'div',
+    { class: 'sheet' },
+    el('h1', {}, 'Classes & shifts'),
+    el('p', { class: 'muted' }, 'Anything that repeats weekly. Buffers are added around these automatically.'),
+    blocks.map((b) =>
+      el(
+        'div',
+        { class: 'card', style: 'display:flex;justify-content:space-between;gap:.5rem' },
+        el(
+          'div',
+          {},
+          el('div', {}, b.title),
+          el('div', { class: 'meta' }, `${DOW[b.weekday]} ${fmtTime(b.start)}–${fmtTime(b.end)}${b.where ? ` · ${b.where}` : ''}`)
+        ),
+        el(
+          'button',
+          {
+            class: 'danger',
+            style: 'flex:none;padding:.4rem .7rem;min-height:0',
+            onclick: () => {
+              patch('fixedBlocks', b.id, { deleted: true });
+              rerender();
+            },
+          },
+          'Remove'
+        )
+      )
+    ),
+    el('h2', {}, 'Add one'),
+    dayChips,
+    el('label', {}, 'What'),
+    title,
+    el('label', {}, 'From / to'),
+    el('div', { class: 'row' }, start, end),
+    el('label', {}, 'Where'),
+    where,
+    el(
+      'div',
+      { class: 'row', style: 'margin-top:1rem' },
+      el('button', { class: 'ghost', onclick: close }, 'Done'),
+      el(
+        'button',
+        {
+          class: 'primary',
+          onclick: () => {
+            if (!title.value.trim()) return;
+            put('fixedBlocks', {
+              weekday,
+              title: title.value.trim(),
+              where: where.value.trim(),
+              start: start.value,
+              end: end.value,
+            });
+            rerender();
+          },
+        },
+        'Add'
+      )
+    ),
+    el('h2', {}, 'Day shape'),
+    el('label', {}, 'Day runs from / to'),
+    el(
+      'div',
+      { class: 'row' },
+      el('input', {
+        type: 'time',
+        value: state.settings.dayStart,
+        onchange: (e) => setSettings({ dayStart: e.target.value }),
+      }),
+      el('input', {
+        type: 'time',
+        value: state.settings.dayEnd,
+        onchange: (e) => setSettings({ dayEnd: e.target.value }),
+      })
+    ),
+    el('label', {}, 'Overflow hour — kept free for whatever slips'),
+    el('input', {
+      type: 'time',
+      value: state.settings.overflowHour,
+      onchange: (e) => setSettings({ overflowHour: e.target.value }),
+    })
+  );
+}
 
 export default function today() {
-  return el('p', { class: 'muted' }, 'Today — coming next.');
+  return [
+    capture(),
+    el('h1', {}, fmtDate(todayStr())),
+    progress(),
+    weeklyGoal(),
+    three(),
+    overloadNudge(),
+    dayView(),
+    el(
+      'button',
+      { class: 'ghost', style: 'width:100%;margin-top:1rem', onclick: () => openOverlay(scheduleEditor) },
+      'Classes & shifts'
+    ),
+  ];
 }
