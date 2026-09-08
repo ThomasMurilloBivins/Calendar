@@ -321,4 +321,6 @@ label { display: block; font-size: .8rem; color: var(--muted); margin: .8rem 0 .
   .screen { flex: 1; padding: 0 2rem 3rem; max-width: 760px; }
   .capture { padding-top: 2rem; }
   .sync { top: .6rem; }
+  /* Square cells get absurdly tall once the grid has room. */
+  .mcell { aspect-ratio: auto; height: 64px; }
 }

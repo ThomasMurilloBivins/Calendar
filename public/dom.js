@@ -48,13 +48,19 @@ export function toast(message, action) {
 
 // Full-screen layer. Triage uses it so a single item is genuinely the only
 // thing on screen; the small forms use it so nothing shifts underneath.
+// Ask the app to redraw the current screen. Needed after an overlay closes
+// (the screen underneath skipped its re-renders while it was open) and for
+// view state that lives in a screen module rather than in the store.
+export function refresh() {
+  window.dispatchEvent(new Event('app-render'));
+}
+
 export function openOverlay(build) {
   const layer = document.getElementById('overlay');
   const close = () => {
     layer.hidden = true;
     layer.replaceChildren();
-    // The screen underneath skipped its re-renders while this was open.
-    window.dispatchEvent(new Event('overlay-closed'));
+    refresh();
   };
   layer.replaceChildren(build(close));
   layer.hidden = false;

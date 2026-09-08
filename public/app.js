@@ -98,7 +98,7 @@ export function render() {
 }
 
 window.addEventListener('hashchange', render);
-window.addEventListener('overlay-closed', render);
+window.addEventListener('app-render', render);
 store.onChange(() => {
   // Don't rebuild the page underneath an open overlay (triage, forms) — it
   // would blow away what the user is part-way through typing.

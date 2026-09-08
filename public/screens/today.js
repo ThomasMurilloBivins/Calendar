@@ -1,5 +1,6 @@
 import { state, put, patch, setSettings } from '../store.js';
 import { el, toast, openOverlay } from '../dom.js';
+import { eventForm } from './week.js';
 import {
   DOW,
   BUFFER,
@@ -364,12 +365,28 @@ function dayView() {
 
   const allDay = eventsForDay(day).filter((e) => !e.time);
 
+  const grid = el(
+    'div',
+    {
+      class: 'day',
+      onclick: (e) => {
+        if (e.target.closest('.block')) return;
+        const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+        const at = dayStart + Math.round(y / PX_PER_MIN / 15) * 15;
+        openOverlay(eventForm({ date: day, time: toHM(Math.min(Math.max(at, dayStart), dayEnd - 15)) }));
+      },
+    },
+    hours,
+    el('div', { class: 'blocks' }, blocks)
+  );
+
   return el(
     'section',
     {},
     el('h2', {}, 'Your day'),
     allDay.map((e) => el('div', { class: 'card meta' }, `${e.kind}: ${e.title}`)),
-    el('div', { class: 'day' }, hours, el('div', { class: 'blocks' }, blocks))
+    el('p', { class: 'muted', style: 'margin-bottom:.6rem' }, 'Tap an empty hour to put something on the calendar.'),
+    grid
   );
 }
 
