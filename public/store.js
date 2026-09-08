@@ -31,10 +31,17 @@ export function blankDoc() {
 export const state = blankDoc();
 
 let serverVersion = 0;
+// Set by every local change, cleared only by a successful push. It survives a
+// reload so edits made offline still get sent once there's a connection again.
+let dirty = false;
 let token = localStorage.getItem('passcode') || '';
 let listeners = [];
 let syncTimer = null;
 let syncState = 'idle'; // idle | syncing | synced | offline | locked | local
+// False when the server has no DATABASE_URL. Syncing still works and is still
+// safe (merging is a union), it just isn't durable, so say so rather than
+// claiming the data is backed up.
+let durable = true;
 
 export function onChange(fn) {
   listeners.push(fn);
@@ -72,7 +79,7 @@ async function idb(mode, fn) {
 }
 
 async function persist() {
-  await idb('readwrite', (s) => s.put({ doc: state, serverVersion }, KEY));
+  await idb('readwrite', (s) => s.put({ doc: state, serverVersion, dirty }, KEY));
 }
 
 function adopt(doc) {
@@ -121,6 +128,7 @@ export function setSettings(changes) {
 }
 
 export function save() {
+  dirty = true;
   persist();
   emit();
   clearTimeout(syncTimer);
@@ -133,7 +141,7 @@ function headers() {
 }
 
 function setSync(s) {
-  syncState = s;
+  syncState = s === 'synced' && !durable ? 'local' : s;
   emit();
 }
 
@@ -191,6 +199,7 @@ export async function push(attempt = 0) {
     }
     const { version } = await res.json();
     serverVersion = version;
+    dirty = false;
     await persist();
     setSync('synced');
   } catch {
@@ -198,11 +207,19 @@ export async function push(attempt = 0) {
   }
 }
 
+// Pull first so we merge whatever the other device wrote, then push if this
+// device is still carrying changes of its own — including ones made offline.
+export async function sync() {
+  await pull();
+  if (dirty) await push();
+}
+
 export async function init() {
   const stored = await idb('readonly', (s) => s.get(KEY)).catch(() => null);
   if (stored?.doc) {
     adopt(stored.doc);
     serverVersion = stored.serverVersion || 0;
+    dirty = Boolean(stored.dirty);
   }
   emit();
 
@@ -210,21 +227,18 @@ export async function init() {
     .then((r) => r.json())
     .catch(() => null);
 
-  if (config && !config.syncEnabled) {
-    setSync('local');
-    return config;
-  }
+  durable = config ? Boolean(config.syncEnabled) : true;
   if (config?.authRequired && !token) {
     setSync('locked');
     return config;
   }
-  await pull();
+  await sync();
 
   // No background jobs exist on the free tier, so the client re-syncs at the
   // only moments that matter: coming back to the tab, and coming back online.
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) pull();
+    if (!document.hidden) sync();
   });
-  window.addEventListener('online', () => pull());
+  window.addEventListener('online', () => sync());
   return config;
 }
