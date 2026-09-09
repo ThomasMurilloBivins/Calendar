@@ -83,9 +83,37 @@ export function fixedForDay(day) {
     .sort((a, b) => toMin(a.start) - toMin(b.start));
 }
 
+// A blank or malformed time setting must never reach the layout maths: it
+// becomes NaN, which collapses the day grid and lets blocks position themselves
+// against nothing.
+export function validMin(hhmm, fallback) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? ''));
+  if (!m) return fallback;
+  const mins = Number(m[1]) * 60 + Number(m[2]);
+  return Number.isFinite(mins) && mins >= 0 && mins <= 1440 ? mins : fallback;
+}
+
 export function overflowRange() {
-  const start = toMin(state.settings.overflowHour);
+  const start = validMin(state.settings.overflowHour, 20 * 60);
   return { start, end: start + 60 };
+}
+
+// The grid is always a real range, and always wide enough to contain everything
+// scheduled that day — including a task set later than the day is meant to end.
+// Anything outside it would render past the container and float over the rest
+// of the screen.
+export function dayBounds(day) {
+  let start = validMin(state.settings.dayStart, 7 * 60);
+  let end = validMin(state.settings.dayEnd, 23 * 60);
+  if (end <= start) {
+    start = 7 * 60;
+    end = 23 * 60;
+  }
+  for (const r of busyRanges(day)) {
+    if (Number.isFinite(r.start)) start = Math.min(start, Math.floor(r.start / 60) * 60);
+    if (Number.isFinite(r.end)) end = Math.max(end, Math.ceil(r.end / 60) * 60);
+  }
+  return { start, end: Math.max(end, start + 60) };
 }
 
 // Everything occupying time on `day`, as {start, end} minute ranges.
@@ -119,8 +147,7 @@ export function busyRanges(day, { padded = false } = {}) {
 // Candidate start times on a 15-minute grid. The overflow hour is excluded on
 // purpose — it is the catch-up slot, and it only works if it stays empty.
 export function freeSlots(day, durationMin = DEFAULT_DURATION) {
-  const dayStart = toMin(state.settings.dayStart);
-  const dayEnd = toMin(state.settings.dayEnd);
+  const { start: dayStart, end: dayEnd } = dayBounds(day);
   const busy = busyRanges(day, { padded: true });
   const now = new Date();
   const earliest = day === today() ? now.getHours() * 60 + now.getMinutes() : -1;

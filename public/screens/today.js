@@ -22,6 +22,8 @@ import {
   eventsForDay,
   fixedForDay,
   overflowRange,
+  dayBounds,
+  validMin,
   todaysThree,
   dayProgress,
   weekDone,
@@ -326,8 +328,7 @@ function block(cls, startMin, endMin, dayStart, ...content) {
 
 function dayView() {
   const day = todayStr();
-  const dayStart = toMin(state.settings.dayStart);
-  const dayEnd = toMin(state.settings.dayEnd);
+  const { start: dayStart, end: dayEnd } = dayBounds(day);
   const hours = [];
   for (let m = dayStart; m < dayEnd; m += 60) {
     hours.push(el('div', { class: 'hour' }, el('span', { class: 'hour-label' }, fmtTime(toHM(m)))));
@@ -405,6 +406,21 @@ function overloadNudge() {
     { class: 'card muted' },
     `That's ${items.length} things and about ${Math.round(minutes / 60)} hours today. Anything here that could just as well be tomorrow?`
   );
+}
+
+// A cleared time field would otherwise be stored as an empty string and break
+// every calculation downstream, so it snaps back to what was there before.
+function timeSetting(key) {
+  const input = el('input', { type: 'time', value: state.settings[key] });
+  input.addEventListener('change', () => {
+    if (validMin(input.value, null) === null) {
+      input.value = state.settings[key];
+      toast('That needs a time.');
+      return;
+    }
+    setSettings({ [key]: input.value });
+  });
+  return input;
 }
 
 // --- schedule editor -----------------------------------------------------
@@ -515,23 +531,11 @@ function scheduleEditor(close) {
     el(
       'div',
       { class: 'row' },
-      el('input', {
-        type: 'time',
-        value: state.settings.dayStart,
-        onchange: (e) => setSettings({ dayStart: e.target.value }),
-      }),
-      el('input', {
-        type: 'time',
-        value: state.settings.dayEnd,
-        onchange: (e) => setSettings({ dayEnd: e.target.value }),
-      })
+      timeSetting('dayStart'),
+      timeSetting('dayEnd')
     ),
     el('label', {}, 'Overflow hour — kept free for whatever slips'),
-    el('input', {
-      type: 'time',
-      value: state.settings.overflowHour,
-      onchange: (e) => setSettings({ overflowHour: e.target.value }),
-    })
+    timeSetting('overflowHour')
   );
 }
 
