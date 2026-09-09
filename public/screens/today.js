@@ -415,7 +415,8 @@ function scheduleEditor(close) {
     .filter((b) => !b.deleted)
     .sort((a, b) => a.weekday - b.weekday || toMin(a.start) - toMin(b.start));
 
-  let weekday = new Date().getDay();
+  // Multi-select: a class that meets Mon/Wed/Fri is entered once, not three times.
+  const weekdays = new Set([new Date().getDay()]);
   const title = el('input', { type: 'text', placeholder: 'ENGL 1101' });
   const where = el('input', { type: 'text', placeholder: 'Where (optional)' });
   const start = el('input', { type: 'time', value: '10:00' });
@@ -427,11 +428,11 @@ function scheduleEditor(close) {
       el(
         'button',
         {
-          class: `chip${i === weekday ? ' on' : ''}`,
+          class: `chip${weekdays.has(i) ? ' on' : ''}`,
           onclick: (e) => {
-            weekday = i;
-            for (const c of dayChips.children) c.classList.remove('on');
-            e.currentTarget.classList.add('on');
+            if (weekdays.has(i)) weekdays.delete(i);
+            else weekdays.add(i);
+            e.currentTarget.classList.toggle('on', weekdays.has(i));
           },
         },
         d
@@ -448,7 +449,7 @@ function scheduleEditor(close) {
     'div',
     { class: 'sheet' },
     el('h1', {}, 'Classes & shifts'),
-    el('p', { class: 'muted' }, 'Anything that repeats weekly. Buffers are added around these automatically.'),
+    el('p', { class: 'muted' }, 'Anything that repeats weekly. Tap every day it meets — buffers are added around each one automatically.'),
     blocks.map((b) =>
       el(
         'div',
@@ -490,14 +491,19 @@ function scheduleEditor(close) {
         {
           class: 'primary',
           onclick: () => {
-            if (!title.value.trim()) return;
-            put('fixedBlocks', {
-              weekday,
-              title: title.value.trim(),
-              where: where.value.trim(),
-              start: start.value,
-              end: end.value,
-            });
+            if (!title.value.trim()) return toast('Give it a name first.');
+            if (!weekdays.size) return toast('Pick at least one day.');
+            // One block per day it meets, so each day can be edited or dropped
+            // on its own later.
+            for (const weekday of weekdays) {
+              put('fixedBlocks', {
+                weekday,
+                title: title.value.trim(),
+                where: where.value.trim(),
+                start: start.value,
+                end: end.value,
+              });
+            }
             rerender();
           },
         },
