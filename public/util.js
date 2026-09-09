@@ -182,3 +182,36 @@ export function weekGoal(ws = weekStart()) {
 
 export const places = () =>
   [...new Set(activeItems().map((i) => i.where).filter(Boolean))].slice(0, 6);
+
+// --- projects ------------------------------------------------------------
+// Ongoing work, not tasks. Loose commitment: hours per week, never a time slot,
+// so there's no particular day to have failed on.
+export const activeProjects = () =>
+  Object.values(state.projects)
+    .filter((p) => !p.archived)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+const logsFor = (projectId) =>
+  Object.values(state.hourLogs).filter((l) => !l.deleted && l.projectId === projectId);
+
+export const projectMinutes = (projectId, from, to) =>
+  logsFor(projectId)
+    .filter((l) => l.date >= from && l.date < to)
+    .reduce((sum, l) => sum + l.minutes, 0);
+
+export const projectTotal = (projectId) =>
+  logsFor(projectId).reduce((sum, l) => sum + l.minutes, 0);
+
+export function projectWeek(project, ws = weekStart()) {
+  const minutes = projectMinutes(project.id, ws, addDays(ws, 7));
+  const targetMinutes = (project.weeklyTargetHours || 0) * 60;
+  return {
+    minutes,
+    targetMinutes,
+    pct: targetMinutes ? Math.min(100, Math.round((minutes / targetMinutes) * 100)) : 0,
+  };
+}
+
+// "3" rather than "3.0", "1.5" rather than "1.50".
+export const toHours = (minutes) => Math.round((minutes / 60) * 10) / 10;
+export const hrs = (hours) => `${hours} ${hours === 1 ? 'hour' : 'hours'}`;

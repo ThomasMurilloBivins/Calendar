@@ -10,6 +10,10 @@ import {
   fmtTime,
   eventsForDay,
   itemsForDay,
+  activeProjects,
+  projectWeek,
+  toHours,
+  hrs,
 } from '../util.js';
 
 const MONTH_NAMES = [
@@ -267,6 +271,32 @@ function agenda() {
   );
 }
 
+// --- projects ------------------------------------------------------------
+// Loose progress, visible, with no day attached to it. "Research: 3 of 5 hours"
+// says where you are without implying you were supposed to do it on Tuesday.
+function projectsThisWeek() {
+  const list = activeProjects();
+  if (!list.length) return null;
+  return el(
+    'section',
+    {},
+    el('h2', {}, 'Projects this week'),
+    list.map((p) => {
+      const { minutes, pct } = projectWeek(p);
+      return el(
+        'a',
+        { class: 'card', href: '#projects', style: 'display:block;text-decoration:none;color:inherit' },
+        el('div', { style: 'font-size:.9rem' }, `${p.name}: ${toHours(minutes)} of ${hrs(p.weeklyTargetHours)}`),
+        el(
+          'div',
+          { class: 'bar bar-small', style: 'margin-top:.5rem' },
+          el('div', { class: 'bar-fill', style: `width:${pct}%` })
+        )
+      );
+    })
+  );
+}
+
 export default function week() {
   if (!cursor) cursor = monthStart(todayStr());
   if (!selected) selected = todayStr();
@@ -275,5 +305,6 @@ export default function week() {
     monthGrid(),
     dayPanel(),
     agenda(),
+    projectsThisWeek(),
   ];
 }
