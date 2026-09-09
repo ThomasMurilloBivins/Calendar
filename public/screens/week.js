@@ -1,5 +1,5 @@
 import { state, put, patch } from '../store.js';
-import { el, openOverlay, refresh, toast } from '../dom.js';
+import { el, fill, openOverlay, refresh, toast } from '../dom.js';
 import {
   DOW,
   today as todayStr,
@@ -7,11 +7,15 @@ import {
   parseYmd,
   addDays,
   relativeDay,
+  fmtDate,
   fmtTime,
   eventsForDay,
   itemsForDay,
   activeProjects,
   projectWeek,
+  activeHabits,
+  habitRolling,
+  habitAge,
   toHours,
   hrs,
 } from '../util.js';
@@ -297,6 +301,266 @@ function projectsThisWeek() {
   );
 }
 
+
+// --- habits --------------------------------------------------------------
+// Rolling percentages over a 30-day window, never streaks. Missing a day moves
+// one number slightly and resets nothing, because a broken streak is the thing
+// that makes people delete the app.
+function habitForm(id) {
+  return (close) => {
+    const existing = id ? state.habits[id] : null;
+    const name = el('input', { type: 'text', placeholder: 'Read 10 pages', value: existing?.name || '' });
+    const cue = el('input', {
+      type: 'text',
+      placeholder: 'after I get back to my dorm',
+      value: existing?.cue || '',
+    });
+    if (!existing) setTimeout(() => name.focus(), 50);
+
+    return el(
+      'div',
+      { class: 'sheet' },
+      el('h1', {}, existing ? 'Edit habit' : 'New habit'),
+      el(
+        'p',
+        { class: 'muted' },
+        'Anchor it to something you already do. A cue you already have beats a time you have to remember.'
+      ),
+      el('label', {}, 'The habit'),
+      name,
+      el('label', {}, 'Right after'),
+      cue,
+      el(
+        'div',
+        { class: 'row', style: 'margin-top:1.2rem' },
+        el('button', { class: 'ghost', onclick: close }, 'Cancel'),
+        el(
+          'button',
+          {
+            class: 'primary',
+            onclick: () => {
+              if (!name.value.trim()) return;
+              put('habits', {
+                ...(existing || { startedOn: todayStr() }),
+                name: name.value.trim(),
+                cue: cue.value.trim(),
+              });
+              close();
+            },
+          },
+          'Save'
+        )
+      ),
+      existing
+        ? el(
+            'button',
+            {
+              class: 'danger',
+              style: 'width:100%;margin-top:.6rem',
+              onclick: () => {
+                patch('habits', existing.id, { archived: true });
+                toast('Archived.', {
+                  label: 'Undo',
+                  run: () => patch('habits', existing.id, { archived: false }),
+                });
+                close();
+              },
+            },
+            'Archive it'
+          )
+        : null
+    );
+  };
+}
+
+function habitsSection() {
+  const list = activeHabits();
+  return el(
+    'section',
+    {},
+    el('h2', {}, 'Habits'),
+    list.map((h) => {
+      const { done, window, pct } = habitRolling(h);
+      const age = habitAge(h);
+      return el(
+        'button',
+        { class: 'card', style: 'width:100%;text-align:left', onclick: () => openOverlay(habitForm(h.id)) },
+        el('strong', {}, h.name),
+        h.cue ? el('div', { style: 'font-size:.9rem' }, h.cue) : null,
+        el(
+          'div',
+          { class: 'bar bar-small', style: 'margin:.6rem 0 .4rem' },
+          el('div', { class: 'bar-fill', style: `width:${pct}%` })
+        ),
+        el('div', { class: 'meta' }, `${done} of the last ${window} ${window === 1 ? 'day' : 'days'} · ${pct}%`),
+        age <= 66 ? el('div', { class: 'meta' }, `day ${age} of about 66`) : null
+      );
+    }),
+    el(
+      'button',
+      { class: 'ghost', style: 'width:100%;margin-top:.4rem', onclick: () => openOverlay(habitForm(null)) },
+      list.length ? 'Add a habit' : 'Add your first habit'
+    )
+  );
+}
+
+// --- syllabus paste-in ---------------------------------------------------
+// There is no API key and no server-side model, so the extraction happens in
+// whatever chat he likes and the answer comes back through here.
+const SYLLABUS_PROMPT = `Pull every date out of the syllabus below. Reply with one line per date and nothing else, in exactly this format:
+
+YYYY-MM-DD | what it is | deadline
+
+Use "competition" or "meeting" in place of "deadline" where they fit better. Here is the syllabus:`;
+
+const pad = (n) => String(n).padStart(2, '0');
+
+function normalizeDate(raw) {
+  const t = String(raw || '').trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${pad(m[1])}-${pad(m[2])}`;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) {
+    // No year given. Assume this academic year, unless that would put the date
+    // well in the past — a spring due date pasted in the autumn.
+    const year = parseYmd(todayStr()).getFullYear();
+    const guess = `${year}-${pad(m[1])}-${pad(m[2])}`;
+    return guess < addDays(todayStr(), -180) ? `${year + 1}-${pad(m[1])}-${pad(m[2])}` : guess;
+  }
+  return null;
+}
+
+const normalizeKind = (raw) => {
+  const t = String(raw || '').toLowerCase();
+  if (t.includes('compet')) return 'competition';
+  if (t.includes('meet')) return 'meeting';
+  return 'deadline';
+};
+
+function parseLine(line) {
+  const raw = line.trim().replace(/^[-*•]\s*/, '');
+  if (!raw) return null;
+  const parts = raw.split('|').map((p) => p.trim());
+  if (parts.length >= 2) {
+    const date = normalizeDate(parts[0]);
+    return date && parts[1] ? { date, title: parts[1], kind: normalizeKind(parts[2]) } : null;
+  }
+  const m = raw.match(/^(\S+)\s+(.+)$/);
+  if (!m) return null;
+  const date = normalizeDate(m[1]);
+  return date ? { date, title: m[2].trim(), kind: 'deadline' } : null;
+}
+
+export function parseSyllabus(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      return JSON.parse(trimmed)
+        .map((r) => ({
+          date: normalizeDate(r.date),
+          title: String(r.title || '').trim(),
+          kind: normalizeKind(r.kind),
+        }))
+        .filter((r) => r.date && r.title);
+    } catch {
+      // Not valid JSON after all — fall through and read it as lines.
+    }
+  }
+  return trimmed.split('\n').map(parseLine).filter(Boolean);
+}
+
+function syllabusSheet(close) {
+  const box = el('div', { class: 'sheet' });
+  const input = el('textarea', { placeholder: 'Paste what the chat gave you', style: 'min-height:9rem' });
+
+  // Nothing is written until he has seen the rows and agreed to them.
+  const confirm = () => {
+    const rows = parseSyllabus(input.value);
+    if (!rows.length) {
+      toast("Couldn't find any dates in that.");
+      return;
+    }
+    const checks = rows.map(() => el('input', { type: 'checkbox', checked: true, style: 'width:auto;flex:none' }));
+    fill(
+      box,
+      el('h1', {}, 'Look them over'),
+      el('p', { class: 'muted' }, 'Nothing is added until you say so. Untick anything that is wrong.'),
+      rows.map((r, i) =>
+        el(
+          'label',
+          {
+            class: 'card',
+            style: 'display:flex;gap:.7rem;align-items:center;margin:.5rem 0 0;font-size:1rem;color:inherit',
+          },
+          checks[i],
+          el('div', {}, el('div', {}, r.title), el('div', { class: 'meta' }, `${fmtDate(r.date)} · ${kindLabel(r.kind)}`))
+        )
+      ),
+      el(
+        'div',
+        { class: 'row', style: 'margin-top:1.2rem' },
+        el('button', { class: 'ghost', onclick: close }, 'Cancel'),
+        el(
+          'button',
+          {
+            class: 'primary',
+            onclick: () => {
+              let added = 0;
+              rows.forEach((r, i) => {
+                if (!checks[i].checked) return;
+                put('events', { title: r.title, date: r.date, kind: r.kind, time: null, where: '' });
+                added += 1;
+              });
+              toast(`${added} added to your calendar.`);
+              close();
+            },
+          },
+          'Add them'
+        )
+      )
+    );
+  };
+
+  fill(
+    box,
+    el('h1', {}, 'Syllabus dates'),
+    el(
+      'p',
+      { class: 'muted' },
+      'No AI runs inside this app. Copy the prompt into any free chat along with your syllabus, then paste the answer back here.'
+    ),
+    el('textarea', { readonly: true, style: 'min-height:7rem', onclick: (e) => e.target.select() }, SYLLABUS_PROMPT),
+    el(
+      'button',
+      {
+        class: 'ghost',
+        style: 'width:100%;margin:.4rem 0 1rem',
+        onclick: async () => {
+          try {
+            await navigator.clipboard.writeText(SYLLABUS_PROMPT);
+            toast('Prompt copied.');
+          } catch {
+            toast('Tap the box and copy it manually.');
+          }
+        },
+      },
+      'Copy the prompt'
+    ),
+    el('label', {}, 'Paste the answer'),
+    input,
+    el(
+      'div',
+      { class: 'row', style: 'margin-top:1rem' },
+      el('button', { class: 'ghost', onclick: close }, 'Cancel'),
+      el('button', { class: 'primary', onclick: confirm }, 'Read them')
+    )
+  );
+  return box;
+}
+
 export default function week() {
   if (!cursor) cursor = monthStart(todayStr());
   if (!selected) selected = todayStr();
@@ -305,6 +569,12 @@ export default function week() {
     monthGrid(),
     dayPanel(),
     agenda(),
+    habitsSection(),
     projectsThisWeek(),
+    el(
+      'button',
+      { class: 'ghost', style: 'width:100%;margin-top:1.2rem', onclick: () => openOverlay(syllabusSheet) },
+      'Paste syllabus dates'
+    ),
   ];
 }

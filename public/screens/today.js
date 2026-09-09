@@ -15,6 +15,10 @@ import {
   freeSlots,
   overdueItems,
   itemsForDay,
+  activeHabits,
+  habitDone,
+  habitLogId,
+  reflectionFor,
   eventsForDay,
   fixedForDay,
   overflowRange,
@@ -525,6 +529,83 @@ function scheduleEditor(close) {
   );
 }
 
+
+// --- habits --------------------------------------------------------------
+// Ticking is the only interaction here: no percentage, no counter, nothing that
+// can be broken by missing yesterday. The number lives on Week.
+function habitRow() {
+  const list = activeHabits();
+  if (!list.length) return null;
+  const day = todayStr();
+  return el(
+    'section',
+    {},
+    el('h2', {}, 'Habits'),
+    list.map((h) => {
+      const done = habitDone(h.id, day);
+      return el(
+        'div',
+        { class: `card task${done ? ' done' : ''}` },
+        el(
+          'button',
+          {
+            class: `task-check${done ? ' on' : ''}`,
+            'aria-label': `${done ? 'Undo' : 'Did'} ${h.name}`,
+            onclick: () =>
+              put('habitLogs', {
+                id: habitLogId(h.id, day),
+                habitId: h.id,
+                date: day,
+                done: !done,
+              }),
+          },
+          done ? '\u2713' : ''
+        ),
+        el(
+          'div',
+          {},
+          el('div', { class: 'task-text' }, h.name),
+          h.cue ? el('div', { class: 'meta' }, h.cue) : null
+        )
+      );
+    })
+  );
+}
+
+// --- reflection ----------------------------------------------------------
+// Two minutes, three boxes, in the evening only. Skipping it leaves no mark of
+// any kind: nothing counts it, nothing asks about it tomorrow.
+function reflection() {
+  if (new Date().getHours() < 18) return null;
+  const day = todayStr();
+  const saved = reflectionFor(day) || {};
+  const field = (key, label, placeholder) => {
+    const input = el('input', {
+      type: 'text',
+      placeholder,
+      // Saved on blur. Saving per keystroke re-renders the screen and would
+      // take the cursor with it.
+      onchange: (e) =>
+        put('reflections', { ...(reflectionFor(day) || {}), id: day, [key]: e.target.value }),
+    });
+    input.value = saved[key] || '';
+    return [el('label', {}, label), input];
+  };
+  return el(
+    'section',
+    {},
+    el('h2', {}, 'Two minutes on today'),
+    el(
+      'div',
+      { class: 'card' },
+      field('worked', 'What worked', 'anything at all'),
+      field('didnt', "What didn't", 'no need to be fair to yourself'),
+      field('oneLine', 'One line', 'the day in a sentence'),
+      el('p', { class: 'muted', style: 'margin-top:.7rem' }, 'Skip it whenever. Nothing is counting.')
+    )
+  );
+}
+
 export default function today() {
   return [
     capture(),
@@ -533,8 +614,10 @@ export default function today() {
     progress(),
     weeklyGoal(),
     three(),
+    habitRow(),
     overloadNudge(),
     dayView(),
+    reflection(),
     el(
       'button',
       { class: 'ghost', style: 'width:100%;margin-top:1rem', onclick: () => openOverlay(scheduleEditor) },

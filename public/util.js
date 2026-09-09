@@ -215,3 +215,38 @@ export function projectWeek(project, ws = weekStart()) {
 // "3" rather than "3.0", "1.5" rather than "1.50".
 export const toHours = (minutes) => Math.round((minutes / 60) * 10) / 10;
 export const hrs = (hours) => `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+
+// --- habits --------------------------------------------------------------
+export const activeHabits = () =>
+  Object.values(state.habits)
+    .filter((h) => !h.archived)
+    .sort((a, b) => (a.startedOn || '').localeCompare(b.startedOn || ''));
+
+// One record per habit per day, with a deterministic id, so the phone and the
+// laptop ticking the same habit on the same day converge to one record.
+export const habitLogId = (habitId, date) => `${habitId}:${date}`;
+export const habitDone = (habitId, date) => Boolean(state.habitLogs[habitLogId(habitId, date)]?.done);
+
+export const daysSince = (dateStr) =>
+  Math.round((parseYmd(today()) - parseYmd(dateStr)) / 86400000);
+
+// A rolling window, never a streak. Missing a day nudges a percentage down and
+// resets nothing — there is deliberately no consecutive-day counter anywhere in
+// this file, because breaking a long streak is what makes people quit outright.
+// The window is capped by the habit's own age so a habit started three days ago
+// isn't scored out of thirty.
+export function habitRolling(habit) {
+  const window = Math.max(1, Math.min(30, daysSince(habit.startedOn) + 1));
+  let done = 0;
+  for (let n = 0; n < window; n++) {
+    if (habitDone(habit.id, addDays(today(), -n))) done++;
+  }
+  return { done, window, pct: Math.round((done / window) * 100) };
+}
+
+// Habits take about 66 days on average to become automatic. Shown quietly, and
+// only while it is still ahead of you.
+export const habitAge = (habit) => daysSince(habit.startedOn) + 1;
+
+// --- reflection ----------------------------------------------------------
+export const reflectionFor = (date = today()) => state.reflections[date] || null;
