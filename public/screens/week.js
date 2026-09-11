@@ -17,6 +17,9 @@ import {
   activeHabits,
   habitRolling,
   habitAge,
+  fixedForDay,
+  openGaps,
+  toHM,
   toHours,
   hrs,
 } from '../util.js';
@@ -157,6 +160,73 @@ export function eventForm(prefill = {}) {
   };
 }
 
+// --- day summary ---------------------------------------------------------
+// For holding the phone out to someone who is asking when you are free, and for
+// printing. The open gaps are the point: "I'm free 2:00–4:00pm" is the answer
+// that actually gets a meeting scheduled.
+export function daySummary(startDay) {
+  return (close) => {
+    const box = el('div', { class: 'sheet summary' });
+    let day = startDay || todayStr();
+
+    const line = (label, detail, cls = '') =>
+      el('div', { class: `sum-row ${cls}`.trim() }, el('strong', {}, label), detail ? el('span', {}, detail) : null);
+
+    function draw() {
+      const fixed = fixedForDay(day);
+      const events = eventsForDay(day);
+      const tasks = itemsForDay(day);
+      const gaps = openGaps(day, 30);
+      const span = (r) => `${fmtTime(toHM(r.start))} – ${fmtTime(toHM(r.end))}`;
+
+      fill(
+        box,
+        el(
+          'div',
+          { class: 'no-print month-nav' },
+          el('button', { onclick: () => { day = addDays(day, -1); draw(); }, 'aria-label': 'Previous day' }, '‹'),
+          el('button', { class: 'ghost', style: 'min-height:0;padding:.35rem .8rem', onclick: () => { day = todayStr(); draw(); } }, 'Today'),
+          el('button', { onclick: () => { day = addDays(day, 1); draw(); }, 'aria-label': 'Next day' }, '›')
+        ),
+
+        el('h1', { class: 'sum-date' }, fmtDate(day)),
+
+        el('h2', {}, 'Committed'),
+        fixed.length || events.length
+          ? [
+              fixed.map((b) => line(`${fmtTime(b.start)} – ${fmtTime(b.end)}`, `${b.title}${b.where ? ` · ${b.where}` : ''}`)),
+              events.map((e) =>
+                line(e.time ? fmtTime(e.time) : 'All day', `${e.title} · ${kindLabel(e.kind)}${e.where ? ` · ${e.where}` : ''}`)
+              ),
+            ]
+          : el('p', { class: 'muted' }, 'Nothing fixed.'),
+
+        el('h2', {}, 'Planned'),
+        tasks.length
+          ? tasks.map((t) =>
+              line(t.time ? fmtTime(t.time) : '—', `${t.text}${t.where ? ` · ${t.where}` : ''}${t.status === 'done' ? ' (done)' : ''}`)
+            )
+          : el('p', { class: 'muted' }, 'Nothing planned.'),
+
+        el('h2', {}, 'Free'),
+        gaps.length
+          ? gaps.map((g) => line(span(g), null, 'sum-free'))
+          : el('p', { class: 'muted' }, 'No open stretches of half an hour or more.'),
+
+        el(
+          'div',
+          { class: 'no-print row', style: 'margin-top:1.5rem' },
+          el('button', { class: 'ghost', onclick: close }, 'Close'),
+          el('button', { class: 'primary', onclick: () => window.print() }, 'Print / Save as PDF')
+        )
+      );
+    }
+
+    draw();
+    return box;
+  };
+}
+
 // --- month grid ----------------------------------------------------------
 function monthGrid() {
   const first = parseYmd(cursor);
@@ -265,6 +335,15 @@ function dayPanel() {
         onclick: () => openOverlay(eventForm({ date: day })),
       },
       'Add to this day'
+    ),
+    el(
+      'button',
+      {
+        class: 'ghost',
+        style: 'width:100%;margin-top:.5rem',
+        onclick: () => openOverlay(daySummary(day)),
+      },
+      'Day summary'
     )
   );
 }

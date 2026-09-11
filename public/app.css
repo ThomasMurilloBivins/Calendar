@@ -340,3 +340,34 @@ button:disabled { cursor: not-allowed; }
   /* Square cells get absurdly tall once the grid has room. */
   .mcell { aspect-ratio: auto; height: 64px; }
 }
+
+/* --- day summary -------------------------------------------------------- */
+.sum-date { font-size: 1.5rem; margin-bottom: .6rem; }
+.sum-row {
+  display: flex;
+  gap: .9rem;
+  padding: .45rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: .95rem;
+}
+.sum-row strong { flex: none; min-width: 8.5rem; font-weight: 600; }
+
+/* --- print -------------------------------------------------------------- */
+/* Everything except the summary is chrome. Printing happens from the overlay,
+   so the page behind it is hidden rather than re-laid out. */
+@media print {
+  .tabs, .capture, .sync, #toast, .no-print { display: none !important; }
+  body { background: #fff; color: #000; }
+  #app { display: none; }
+  #overlay {
+    position: static;
+    padding: 0;
+    background: #fff;
+    color: #000;
+    overflow: visible;
+  }
+  .sheet { max-width: none; }
+  .sum-row { border-bottom: 1px solid #ccc; }
+  h2 { margin-top: 1.2rem; }
+  .muted { color: #444; }
+}

@@ -1,6 +1,6 @@
 import { state, put, patch, setSettings } from '../store.js';
 import { el, toast, openOverlay } from '../dom.js';
-import { eventForm } from './week.js';
+import { eventForm, daySummary } from './week.js';
 import {
   DOW,
   BUFFER,
@@ -630,7 +630,12 @@ export default function today() {
     reflection(),
     el(
       'button',
-      { class: 'ghost', style: 'width:100%;margin-top:1rem', onclick: () => openOverlay(scheduleEditor) },
+      { class: 'ghost', style: 'width:100%;margin-top:1rem', onclick: () => openOverlay(daySummary(todayStr())) },
+      'Day summary'
+    ),
+    el(
+      'button',
+      { class: 'ghost', style: 'width:100%;margin-top:.5rem', onclick: () => openOverlay(scheduleEditor) },
       'Classes & shifts'
     ),
   ];
