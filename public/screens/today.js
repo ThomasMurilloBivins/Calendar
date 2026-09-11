@@ -34,6 +34,37 @@ import {
 
 const PX_PER_MIN = 1; // .hour is 60px tall
 
+// --- the now line --------------------------------------------------------
+// One timer for the life of the app rather than one per render, which would
+// leak an interval every time the screen redraws. It moves the line in place
+// instead of re-rendering, so it can't disturb anything being typed.
+let nowLine = null;
+let nowLineStart = 0;
+let nowLineEnd = 0;
+
+function placeNowLine() {
+  // No isConnected check: the first placement happens while the element is
+  // still being assembled, before it is in the document. A stale line from a
+  // previous render is detached and harmless.
+  if (!nowLine) return;
+  const d = new Date();
+  const mins = d.getHours() * 60 + d.getMinutes();
+  // Hidden outside the grid's range rather than clamped to an edge, which
+  // would claim it is 7am at three in the morning.
+  if (mins < nowLineStart || mins > nowLineEnd) {
+    nowLine.hidden = true;
+    return;
+  }
+  nowLine.hidden = false;
+  nowLine.style.top = `${(mins - nowLineStart) * PX_PER_MIN}px`;
+  nowLine.firstChild.textContent = fmtTime(toHM(mins));
+}
+
+setInterval(placeNowLine, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) placeNowLine();
+});
+
 // --- capture -------------------------------------------------------------
 // One field, no dropdowns, no required anything. Enter saves it to the Inbox
 // and the field stays focused so a second thought costs nothing.
@@ -370,6 +401,11 @@ function dayView() {
 
   const allDay = eventsForDay(day).filter((e) => !e.time);
 
+  nowLine = el('div', { class: 'now-line' }, el('span', { class: 'now-label' }, ''));
+  nowLineStart = dayStart;
+  nowLineEnd = dayEnd;
+  placeNowLine();
+
   const grid = el(
     'div',
     {
@@ -382,7 +418,8 @@ function dayView() {
       },
     },
     hours,
-    el('div', { class: 'blocks' }, blocks)
+    el('div', { class: 'blocks' }, blocks),
+    nowLine
   );
 
   return el(

@@ -371,3 +371,37 @@ button:disabled { cursor: not-allowed; }
   h2 { margin-top: 1.2rem; }
   .muted { color: #444; }
 }
+
+/* --- where you are right now -------------------------------------------- */
+/* The one red thing in the app. It marks a position, not a judgement — no
+   other part of the day view uses this colour. */
+:root { --now: #d93025; }
+@media (prefers-color-scheme: dark) { :root { --now: #ff7b72; } }
+
+.now-line {
+  position: absolute;
+  left: 0; right: .2rem;
+  height: 0;
+  border-top: 2px solid var(--now);
+  z-index: 3;
+  pointer-events: none;
+}
+.now-line::after {
+  content: '';
+  position: absolute;
+  left: 3.05rem; top: -4px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--now);
+}
+.now-label {
+  position: absolute;
+  left: 0; top: -.62rem;
+  font-size: .65rem;
+  font-weight: 700;
+  color: var(--now);
+  background: var(--bg);
+  padding-right: .3rem;
+}
+/* A printed page is not "now". */
+@media print { .now-line { display: none; } }
