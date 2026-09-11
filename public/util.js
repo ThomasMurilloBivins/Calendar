@@ -277,3 +277,68 @@ export const habitAge = (habit) => daysSince(habit.startedOn) + 1;
 
 // --- reflection ----------------------------------------------------------
 export const reflectionFor = (date = today()) => state.reflections[date] || null;
+
+// --- conflicts -----------------------------------------------------------
+// Every time is offered; the app just won't let you double-book by accident.
+// Hard = a real overlap with a class, event, or another task, and that blocks
+// saving. Soft = a 15-minute buffer or the overflow hour, which warns and lets
+// you through — those are guardrails, not facts about your day.
+function labelFor(range) {
+  if (range.kind === 'fixed') return range.ref.title;
+  if (range.kind === 'event') return range.ref.title;
+  if (range.kind === 'task') return range.ref.text;
+  return 'something';
+}
+
+export function conflictsAt(day, startMin, durationMin, ignoreId) {
+  const end = startMin + durationMin;
+  const hits = (a, b) => startMin < b && end > a;
+  const hard = [];
+  const soft = [];
+
+  for (const r of busyRanges(day)) {
+    if (ignoreId && r.ref && r.ref.id === ignoreId) continue;
+    if (!hits(r.start, r.end)) continue;
+    if (r.kind === 'overflow') soft.push({ label: 'your overflow hour', start: r.start, end: r.end });
+    else hard.push({ label: labelFor(r), start: r.start, end: r.end });
+  }
+
+  // The buffers either side of a fixed commitment, which are walking time
+  // rather than something already in the diary.
+  for (const b of fixedForDay(day)) {
+    if (ignoreId && b.id === ignoreId) continue;
+    const s = toMin(b.start);
+    const e = toMin(b.end);
+    if (hits(s - BUFFER, s)) soft.push({ label: `the buffer before ${b.title}`, start: s - BUFFER, end: s });
+    if (hits(e, e + BUFFER)) soft.push({ label: `the buffer after ${b.title}`, start: e, end: e + BUFFER });
+  }
+
+  return { hard, soft };
+}
+
+// Merged busy time subtracted from the day, for "free 2:00–4:00pm" when
+// someone is standing in front of you asking when you can meet.
+export function openGaps(day, minMinutes = 30) {
+  const { start, end } = dayBounds(day);
+  const busy = busyRanges(day)
+    .filter((r) => r.kind !== 'overflow')
+    .map((r) => ({ start: Math.max(r.start, start), end: Math.min(r.end, end) }))
+    .filter((r) => r.end > r.start)
+    .sort((a, b) => a.start - b.start);
+
+  const merged = [];
+  for (const r of busy) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+
+  const gaps = [];
+  let cursor = start;
+  for (const r of merged) {
+    if (r.start - cursor >= minMinutes) gaps.push({ start: cursor, end: r.start });
+    cursor = Math.max(cursor, r.end);
+  }
+  if (end - cursor >= minMinutes) gaps.push({ start: cursor, end });
+  return gaps;
+}

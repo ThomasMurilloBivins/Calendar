@@ -136,7 +136,7 @@ button { font: inherit; cursor: pointer; }
 .row { display: flex; gap: .5rem; }
 .row > * { flex: 1; }
 
-input[type=text], input[type=password], input[type=date], input[type=time], input[type=number], textarea, select {
+input[type=text], input[type=password], input[type=date], input[type=time], input[type=number], textarea, select, .timeselect {
   font: inherit;
   font-size: 16px;
   width: 100%;
@@ -301,6 +301,22 @@ label { display: block; font-size: .8rem; color: var(--muted); margin: .8rem 0 .
 .dot.event { background: var(--warn); }
 .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: .4rem; }
 .month-nav button { background: none; border: 0; color: var(--accent); font-size: 1.1rem; padding: .4rem .8rem; }
+
+/* --- time picking ------------------------------------------------------ */
+.timeselect { appearance: none; background-image: none; }
+/* Option colouring is honoured by some browsers and ignored by others, so the
+   clash is written into the option text too. This is decoration, not the signal. */
+.opt-clash { color: #b3261e; }
+.opt-warn { color: var(--warn); }
+
+.conflict { font-size: .82rem; margin: .4rem 0 0; }
+.conflict-free { color: var(--muted); }
+.conflict-warn { color: var(--warn); }
+.conflict-clash { color: #b3261e; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .conflict-clash, .opt-clash { color: #f2b8b5; } }
+
+.primary:disabled, .ghost:disabled { opacity: .45; }
+button:disabled { cursor: not-allowed; }
 
 /* --- laptop ------------------------------------------------------------ */
 @media (min-width: 900px) {

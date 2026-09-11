@@ -1,5 +1,6 @@
 import { put, patch } from '../store.js';
 import { el, fill, toast, openOverlay } from '../dom.js';
+import { timeSelect } from '../timeselect.js';
 import {
   DEFAULT_DURATION,
   today as todayStr,
@@ -85,7 +86,6 @@ function triage(close) {
   function schedule(item) {
     let day = todayStr();
     let duration = DEFAULT_DURATION;
-    let time = null;
     let fallback = null;
     let where = item.where || '';
 
@@ -116,10 +116,52 @@ function triage(close) {
       return { count, each, parts };
     }
 
+    let isLong = false;
+    let atCapNow = false;
+
+    // The button is built once and only its disabled state changes, so the
+    // reason for a refusal is visible rather than the button being mysteriously
+    // dead. A hard overlap is the only thing that blocks; buffers and the
+    // overflow hour warn in the picker and still save.
+    const saveButton = el(
+      'button',
+      {
+        class: 'primary',
+        style: 'width:100%;margin-top:1.2rem',
+        onclick: () =>
+          commit([
+            {
+              status: 'planned',
+              day,
+              time: picker.value(),
+              durationMin: duration,
+              where,
+              fallbackDay: fallback ? fallback.split('|')[0] : null,
+              fallbackTime: fallback ? fallback.split('|')[1] : null,
+              // Choosing to do it today is the moment you choose your three.
+              top3For: day === todayStr() && !atCapNow ? day : null,
+            },
+          ]),
+      },
+      'Plan it'
+    );
+
+    function syncSave() {
+      const stop = !picker.value() || picker.blocked() || isLong;
+      saveButton.disabled = stop;
+      saveButton.textContent = picker.blocked() ? 'Pick a time that is free' : 'Plan it';
+    }
+
+    // One picker instance for the life of the form: rebuilding it on every
+    // redraw would close the dropdown mid-choice.
+    const picker = timeSelect({
+      day,
+      durationMin: duration,
+      value: slotChoices(day, DEFAULT_DURATION)[0] || null,
+      onChange: () => syncSave(),
+    });
+
     function draw() {
-      const slots = slotChoices(day, duration);
-      if (time && !slots.includes(time)) time = null;
-      if (!time) time = slots[0] || null;
       const fbs = fallbackChoices(day, duration);
       if (!fallback && fbs.length) fallback = fbs[0];
 
@@ -142,8 +184,8 @@ function triage(close) {
           day,
           (v) => {
             day = v;
-            time = null;
             fallback = null;
+            picker.update({ day: v, value: slotChoices(v, duration)[0] || null });
             draw();
           },
           (o) => relativeDay(o.value)
@@ -155,7 +197,7 @@ function triage(close) {
           duration,
           (v) => {
             duration = v;
-            time = null;
+            picker.update({ durationMin: v });
             draw();
           },
           (o) => (o.value < 60 ? `${o.value}m` : `${o.value / 60}h`)
@@ -213,17 +255,7 @@ function triage(close) {
           : null,
 
         el('label', {}, 'What time'),
-        slots.length
-          ? chipRow(
-              slots.map((s) => ({ value: s })),
-              time,
-              (v) => {
-                time = v;
-                draw();
-              },
-              (o) => fmtTime(o.value)
-            )
-          : el('p', { class: 'muted' }, 'Nothing open that day. Try another one.'),
+        picker.node,
 
         el('label', {}, 'Where'),
         whereInput,
@@ -268,30 +300,12 @@ function triage(close) {
             )
           : null,
 
-        el(
-          'button',
-          {
-            class: 'primary',
-            style: 'width:100%;margin-top:1.2rem',
-            disabled: !time || long,
-            onclick: () =>
-              commit([
-                {
-                  status: 'planned',
-                  day,
-                  time,
-                  durationMin: duration,
-                  where,
-                  fallbackDay: fallback ? fallback.split('|')[0] : null,
-                  fallbackTime: fallback ? fallback.split('|')[1] : null,
-                  // Choosing to do it today is the moment you choose your three.
-                  top3For: day === todayStr() && !atCap ? day : null,
-                },
-              ]),
-          },
-          'Plan it'
-        )
+        saveButton
       );
+      // `long` gates saving too, so the state has to be recomputed after a redraw.
+      isLong = long;
+      atCapNow = atCap;
+      syncSave();
     }
 
     draw();

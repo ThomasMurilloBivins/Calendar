@@ -1,5 +1,6 @@
 import { state, put, patch } from '../store.js';
 import { el, fill, openOverlay, refresh, toast } from '../dom.js';
+import { timeSelect } from '../timeselect.js';
 import {
   DOW,
   today as todayStr,
@@ -50,8 +51,49 @@ export function eventForm(prefill = {}) {
     let kind = existing?.kind || prefill.kind || 'deadline';
     const title = el('input', { type: 'text', placeholder: 'Research paper draft', value: existing?.title || '' });
     const date = el('input', { type: 'date', value: existing?.date || prefill.date || todayStr() });
-    const time = el('input', { type: 'time', value: existing?.time || prefill.time || '' });
     const where = el('input', { type: 'text', placeholder: 'Optional', value: existing?.where || '' });
+
+    const picker = timeSelect({
+      day: existing?.date || prefill.date || todayStr(),
+      value: existing?.time || prefill.time || null,
+      // An event must never be told it clashes with itself.
+      ignoreId: existing?.id || null,
+      allowNone: true,
+      onChange: () => syncSave(),
+    });
+
+    const saveButton = el(
+      'button',
+      {
+        class: 'primary',
+        onclick: () => {
+          if (!title.value.trim() || picker.blocked()) return;
+          put('events', {
+            ...(existing || {}),
+            title: title.value.trim(),
+            date: date.value,
+            time: picker.value() || null,
+            kind,
+            where: where.value.trim(),
+          });
+          selected = date.value;
+          close();
+        },
+      },
+      'Save'
+    );
+
+    // Only a real overlap stops a save. Buffers and the overflow hour are
+    // warnings in the picker, not refusals.
+    function syncSave() {
+      if (!saveButton) return;
+      saveButton.disabled = picker.blocked();
+      saveButton.textContent = picker.blocked() ? 'Pick a time that is free' : 'Save';
+    }
+    syncSave();
+
+    // Changing the date re-checks against that day's commitments.
+    date.addEventListener('change', () => picker.update({ day: date.value }));
 
     const kindChips = el(
       'div',
@@ -83,34 +125,15 @@ export function eventForm(prefill = {}) {
       el('label', {}, 'Kind'),
       kindChips,
       el('label', {}, 'When'),
-      el('div', { class: 'row' }, date, time),
-      el('p', { class: 'muted' }, 'Leave the time blank if it just has to happen that day.'),
+      date,
+      picker.node,
       el('label', {}, 'Where'),
       where,
       el(
         'div',
         { class: 'row', style: 'margin-top:1.2rem' },
         el('button', { class: 'ghost', onclick: close }, 'Cancel'),
-        el(
-          'button',
-          {
-            class: 'primary',
-            onclick: () => {
-              if (!title.value.trim()) return;
-              put('events', {
-                ...(existing || {}),
-                title: title.value.trim(),
-                date: date.value,
-                time: time.value || null,
-                kind,
-                where: where.value.trim(),
-              });
-              selected = date.value;
-              close();
-            },
-          },
-          'Save'
-        )
+        saveButton
       ),
       existing
         ? el(

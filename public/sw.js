@@ -14,6 +14,7 @@ const SHELL = [
   '/screens/inbox.js',
   '/screens/week.js',
   '/screens/projects.js',
+  '/timeselect.js',
   '/manifest.webmanifest',
 ];
 
