@@ -1,5 +1,5 @@
 import { state, put, patch, setSettings } from '../store.js';
-import { el, toast, openOverlay } from '../dom.js';
+import { el, toast, openOverlay, refresh } from '../dom.js';
 import { eventForm, daySummary } from './week.js';
 import {
   DOW,
@@ -33,6 +33,10 @@ import {
 } from '../util.js';
 
 const PX_PER_MIN = 1; // .hour is 60px tall
+const WINDOW_MIN = 5 * 60; // the slice of day shown by default
+
+// Module scope so the choice survives a re-render.
+let showWholeDay = false;
 
 // --- the now line --------------------------------------------------------
 // One timer for the life of the app rather than one per render, which would
@@ -360,50 +364,66 @@ function block(cls, startMin, endMin, dayStart, ...content) {
 function dayView() {
   const day = todayStr();
   const { start: dayStart, end: dayEnd } = dayBounds(day);
+
+  // Most of a 16-hour grid is empty and behind you. Default to the part you can
+  // still act on; the whole day stays one tap away, and the toggle says how much
+  // is hidden so nothing ever seems to have vanished.
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  let winStart = dayStart;
+  let winEnd = dayEnd;
+  if (!showWholeDay) {
+    const anchor = nowMin >= dayStart && nowMin <= dayEnd ? nowMin : dayStart;
+    winStart = Math.max(dayStart, Math.floor((anchor - 60) / 60) * 60);
+    winEnd = Math.min(dayEnd, winStart + WINDOW_MIN);
+    winStart = Math.max(dayStart, Math.min(winStart, winEnd - WINDOW_MIN));
+  }
+
   const hours = [];
-  for (let m = dayStart; m < dayEnd; m += 60) {
+  for (let m = winStart; m < winEnd; m += 60) {
     hours.push(el('div', { class: 'hour' }, el('span', { class: 'hour-label' }, fmtTime(toHM(m)))));
   }
 
+  // Anything outside the window is skipped rather than drawn past the grid,
+  // and anything straddling the edge is clipped to it.
   const blocks = [];
+  let hidden = 0;
+  const add = (cls, s, e, ...content) => {
+    if (e <= winStart || s >= winEnd) return false;
+    blocks.push(block(cls, Math.max(s, winStart), Math.min(e, winEnd), winStart, ...content));
+    return true;
+  };
+
   const of = overflowRange();
-  blocks.push(
-    block('block-overflow', of.start, of.end, dayStart, 'Overflow — keep this one free')
-  );
+  add('block-overflow', of.start, of.end, 'Overflow — keep this one free');
 
   for (const b of fixedForDay(day)) {
     const s = toMin(b.start);
     const e = toMin(b.end);
     // 15-minute buffers so nothing is scheduled flush against a commitment you
     // have to physically get to.
-    blocks.push(block('block-buffer', Math.max(dayStart, s - BUFFER), s, dayStart));
-    blocks.push(block('block-buffer', e, Math.min(dayEnd, e + BUFFER), dayStart));
-    blocks.push(
-      block('block-fixed', s, e, dayStart, el('b', {}, b.title), b.where ? ` · ${b.where}` : '')
-    );
+    add('block-buffer', s - BUFFER, s);
+    add('block-buffer', e, e + BUFFER);
+    if (!add('block-fixed', s, e, el('b', {}, b.title), b.where ? ` · ${b.where}` : '')) hidden += 1;
   }
 
   for (const i of itemsForDay(day)) {
     if (!i.time) continue;
     const s = toMin(i.time);
-    blocks.push(
-      block('block-task', s, s + (i.durationMin || DEFAULT_DURATION), dayStart, el('b', {}, i.text))
-    );
+    if (!add('block-task', s, s + (i.durationMin || DEFAULT_DURATION), el('b', {}, i.text))) hidden += 1;
   }
 
   for (const ev of eventsForDay(day)) {
     if (!ev.time) continue;
     const s = toMin(ev.time);
-    blocks.push(
-      block('block-event', s, s + (ev.durationMin || DEFAULT_DURATION), dayStart, el('b', {}, ev.title))
-    );
+    if (!add('block-event', s, s + (ev.durationMin || DEFAULT_DURATION), el('b', {}, ev.title))) hidden += 1;
   }
 
   const allDay = eventsForDay(day).filter((e) => !e.time);
 
   nowLine = el('div', { class: 'now-line' }, el('span', { class: 'now-label' }, ''));
-  nowLineStart = dayStart;
-  nowLineEnd = dayEnd;
+  nowLineStart = winStart;
+  nowLineEnd = winEnd;
   placeNowLine();
 
   const grid = el(
@@ -413,13 +433,27 @@ function dayView() {
       onclick: (e) => {
         if (e.target.closest('.block')) return;
         const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
-        const at = dayStart + Math.round(y / PX_PER_MIN / 15) * 15;
-        openOverlay(eventForm({ date: day, time: toHM(Math.min(Math.max(at, dayStart), dayEnd - 15)) }));
+        const at = winStart + Math.round(y / PX_PER_MIN / 15) * 15;
+        openOverlay(eventForm({ date: day, time: toHM(Math.min(Math.max(at, winStart), winEnd - 15)) }));
       },
     },
     hours,
     el('div', { class: 'blocks' }, blocks),
     nowLine
+  );
+
+  const toggle = el(
+    'button',
+    {
+      class: 'ghost daytoggle',
+      onclick: () => {
+        showWholeDay = !showWholeDay;
+        refresh();
+      },
+    },
+    showWholeDay
+      ? 'Just around now'
+      : `Show the whole day${hidden ? ` — ${hidden} more scheduled` : ''}`
   );
 
   return el(
@@ -428,9 +462,11 @@ function dayView() {
     el('h2', {}, 'Your day'),
     allDay.map((e) => el('div', { class: 'card meta' }, `${e.kind}: ${e.title}`)),
     el('p', { class: 'muted', style: 'margin-bottom:.6rem' }, 'Tap an empty hour to put something on the calendar.'),
-    grid
+    grid,
+    toggle
   );
 }
+
 
 // A full day is the thing that fails by mid-morning, so say so before it does.
 function overloadNudge() {

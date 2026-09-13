@@ -405,3 +405,6 @@ button:disabled { cursor: not-allowed; }
 }
 /* A printed page is not "now". */
 @media print { .now-line { display: none; } }
+
+.daytoggle { width: 100%; margin-top: .5rem; font-size: .85rem; min-height: 40px; }
+@media print { .daytoggle { display: none; } }
