@@ -391,6 +391,46 @@ function triage(close) {
 }
 
 // --- inbox ---------------------------------------------------------------
+// Some captures are dead on arrival and don't deserve a trip through Triage.
+// Swiping is the same guilt-free drop, with the same Undo.
+function dropItem(item) {
+  patch('items', item.id, { status: 'dropped' });
+  toast('Dropped.', { label: 'Undo', run: () => patch('items', item.id, { status: 'inbox' }) });
+}
+
+function inboxRow(item) {
+  const row = el('div', { class: 'card inbox-row' }, el('span', {}, item.text));
+  row.append(
+    el(
+      'button',
+      { class: 'inbox-drop', 'aria-label': `Drop ${item.text}`, onclick: () => dropItem(item) },
+      '\u00d7'
+    )
+  );
+
+  let x0 = null;
+  row.addEventListener('touchstart', (e) => {
+    x0 = e.touches[0].clientX;
+    row.style.transition = 'none';
+  }, { passive: true });
+  row.addEventListener('touchmove', (e) => {
+    if (x0 === null) return;
+    const dx = Math.min(0, e.touches[0].clientX - x0);
+    row.style.transform = `translateX(${dx}px)`;
+    row.style.opacity = String(Math.max(0.25, 1 + dx / 260));
+  }, { passive: true });
+  row.addEventListener('touchend', (e) => {
+    if (x0 === null) return;
+    const dx = (e.changedTouches[0]?.clientX ?? x0) - x0;
+    row.style.transition = '';
+    row.style.transform = '';
+    row.style.opacity = '';
+    x0 = null;
+    if (dx < -90) dropItem(item);
+  });
+  return row;
+}
+
 export default function inbox() {
   const items = inboxItems();
   if (!items.length) {
@@ -407,7 +447,8 @@ export default function inbox() {
       { class: 'primary', style: 'width:100%;margin:.8rem 0 1.2rem', onclick: () => openOverlay(triage) },
       'Triage'
     ),
-    items.map((i) => el('div', { class: 'card' }, i.text)),
+    items.map(inboxRow),
+    el('p', { class: 'muted', style: 'margin-top:.8rem' }, 'Swipe an item away to drop it.'),
   ];
 }
 

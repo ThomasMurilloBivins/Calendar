@@ -36,17 +36,35 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // sync must never read a cache
 
+  const key = e.request.mode === 'navigate' ? '/index.html' : e.request;
+
+  // Revalidation runs under waitUntil, called synchronously here: returning the
+  // cached copy from respondWith ends the event, and without waitUntil the
+  // worker can be killed before the new copy is ever written.
+  const revalidate = caches.open(CACHE).then(async (cache) => {
+    const cached = await cache.match(key);
+    try {
+      const res = await fetch(e.request);
+      if (!res.ok) return cached || res;
+      // Serving the cached copy first means a deploy only showed up on the
+      // *second* open. Compare ETags and tell the page it is running stale code.
+      const changed = cached && cached.headers.get('etag') !== res.headers.get('etag');
+      await cache.put(key, res.clone());
+      if (changed) {
+        const windows = await self.clients.matchAll({ type: 'window' });
+        for (const c of windows) c.postMessage({ type: 'shell-updated' });
+      }
+      return res;
+    } catch {
+      return cached;
+    }
+  });
+
+  e.waitUntil(revalidate);
   e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const key = e.request.mode === 'navigate' ? '/index.html' : e.request;
-      const cached = await cache.match(key);
-      const network = fetch(e.request)
-        .then((res) => {
-          if (res.ok) cache.put(key, res.clone());
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    caches
+      .open(CACHE)
+      .then((cache) => cache.match(key))
+      .then((cached) => cached || revalidate)
   );
 });

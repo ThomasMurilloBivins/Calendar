@@ -499,7 +499,7 @@ function timeSetting(key) {
 // --- schedule editor -----------------------------------------------------
 // Classes and shifts repeat weekly; the buffers and free-slot maths need them,
 // so they live here rather than in a settings screen.
-function scheduleEditor(close) {
+export function scheduleEditor(close) {
   const blocks = Object.values(state.fixedBlocks)
     .filter((b) => !b.deleted)
     .sort((a, b) => a.weekday - b.weekday || toMin(a.start) - toMin(b.start));
@@ -706,10 +706,6 @@ export default function today() {
       { class: 'ghost', style: 'width:100%;margin-top:1rem', onclick: () => openOverlay(daySummary(todayStr())) },
       'Day summary'
     ),
-    el(
-      'button',
-      { class: 'ghost', style: 'width:100%;margin-top:.5rem', onclick: () => openOverlay(scheduleEditor) },
-      'Classes & shifts'
-    ),
+
   ];
 }
