@@ -118,6 +118,10 @@ function triage(close) {
 
     let isLong = false;
     let atCapNow = false;
+    // Collapsed by default. The defaults below are the answer most of the time,
+    // so the common path is read-one-line-and-tap rather than work through 26
+    // controls. Nothing is removed — Change opens all of it.
+    let detail = false;
 
     // The button is built once and only its disabled state changes, so the
     // reason for a refusal is visible rather than the button being mysteriously
@@ -175,6 +179,49 @@ function triage(close) {
       const long = duration > 90;
       const plan = long ? splitPlan() : null;
       const atCap = day === todayStr() && todaysThree().length >= 3;
+
+      if (!detail) {
+        const t = picker.value();
+        const fb = fallback ? fallback.split('|') : null;
+        fill(
+          body,
+          el(
+            'p',
+            { class: 'plan-line' },
+            [
+              relativeDay(day),
+              t ? fmtTime(t) : 'no time yet',
+              duration < 60 ? `${duration} min` : `${duration / 60}h`,
+              where || null,
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          ),
+          fb
+            ? el('p', { class: 'meta' }, `If you miss it: ${relativeDay(fb[0])} ${fmtTime(fb[1])}`)
+            : null,
+          picker.blocked()
+            ? el('p', { class: 'conflict conflict-clash' }, 'That time is taken — tap Change.')
+            : null,
+          el(
+            'button',
+            {
+              class: 'ghost',
+              style: 'width:100%;margin-top:.6rem',
+              onclick: () => {
+                detail = true;
+                draw();
+              },
+            },
+            'Change'
+          ),
+          saveButton
+        );
+        isLong = long;
+        atCapNow = atCap;
+        syncSave();
+        return;
+      }
 
       fill(
         body,
